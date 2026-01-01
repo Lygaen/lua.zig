@@ -36,10 +36,13 @@ pub fn build(b: *std.Build) void {
                     example_name ++ ".zig",
                 })),
             }),
+            .use_llvm = true,
         });
 
         exe.root_module.addImport("lua-c", lua_c);
         exe.root_module.addImport("lua-zig", lib_mod);
+
+        b.installArtifact(exe);
 
         const run_exe = b.addRunArtifact(exe);
         const run_step = b.step("run-" ++ example_name, "Run the example '" ++ example_name ++ "'");
@@ -146,7 +149,7 @@ const LUA_C_FILES = [_][]const u8{
     "ltable.c",
     "ltablib.c",
     "ltm.c",
-    "lua.c",
+
     "lundump.c",
     "lutf8lib.c",
     "lvm.c",
