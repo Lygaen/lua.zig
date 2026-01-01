@@ -65,23 +65,16 @@ pub const LuaError = error{
 pub fn luaAlloc(userdata: ?*anyopaque, ptr: ?*anyopaque, osize: usize, nsize: usize) callconv(.c) ?*anyopaque {
     const alloc_ptr: *std.mem.Allocator = @ptrCast(@alignCast(userdata));
 
-    // nsize = 0 means it acts like C's free
-    if (nsize == 0) {
-        if (ptr) |block| {
-            alloc_ptr.free(@as([*]u8, @ptrCast(block))[0..osize]);
+    const block: []u8 = blk: {
+        if (ptr) |safe_ptr| {
+            break :blk @as([*]u8, @ptrCast(safe_ptr))[0..osize];
         }
-        return null;
-    }
 
-    if (ptr) |block| {
-        // Reallocation request
-        const new_ptr = alloc_ptr.realloc(@as([*]u8, @ptrCast(block))[0..osize], nsize) catch return null;
-        return new_ptr.ptr;
-    } else {
-        // Allocation request
-        const new_ptr = alloc_ptr.alloc(u8, nsize) catch return null;
-        return new_ptr.ptr;
-    }
+        break :blk &.{};
+    };
+
+    const new_ptr = alloc_ptr.realloc(block, nsize) catch return null;
+    return new_ptr.ptr;
 }
 
 pub const IoReaderUserData = struct {
