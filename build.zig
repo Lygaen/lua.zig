@@ -8,6 +8,8 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const check_step = b.step("check", "Checks that everything compiles");
+
     generateLuaModule(b, target, optimize);
     const lua_c = b.modules.get("lua.c") orelse unreachable;
 
@@ -24,6 +26,7 @@ pub fn build(b: *std.Build) void {
         .root_module = lib_mod,
     });
     b.installArtifact(lib_artifact);
+    check_step.dependOn(&lib_artifact.step);
 
     inline for (EXAMPLES_NAMES) |example_name| {
         const exe = b.addExecutable(.{
@@ -42,12 +45,21 @@ pub fn build(b: *std.Build) void {
         exe.root_module.addImport("lua-c", lua_c);
         exe.root_module.addImport("lua-zig", lib_mod);
 
+        check_step.dependOn(&exe.step);
+
         b.installArtifact(exe);
 
         const run_exe = b.addRunArtifact(exe);
         const run_step = b.step("run-" ++ example_name, "Run the example '" ++ example_name ++ "'");
         run_step.dependOn(&run_exe.step);
     }
+
+    const docs_step = b.step("docs", "Emits the library documentation");
+    docs_step.dependOn(&b.addInstallDirectory(.{
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+        .source_dir = lib_artifact.getEmittedDocs(),
+    }).step);
 }
 
 /// Generates and exposes a zig translate-c module of
