@@ -3,6 +3,8 @@
 //! but seeing the state of other libraries (not matching my needs),
 //! decided to give it open source it.
 //!
+//! I use the MIT License.
+//!
 //! Most of the coding is done inside `Lua.zig`. This will
 //! be where you pull most of the code.
 //!
