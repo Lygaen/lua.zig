@@ -21,5 +21,5 @@ pub fn main() !void {
 
     const reader = std.Io.Reader.fixed(LUA_PROGRAM);
     try state.loadFromReader(reader);
-    try state.call(null);
+    try state.callRaw(null);
 }

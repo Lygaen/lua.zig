@@ -1,3 +1,8 @@
+//! The type representing a `lua_State`.
+//!
+//! It contains tangeant logic such as
+//! loading from a reader etc.
+
 const std = @import("std");
 
 const lua = @import("lua.c");
@@ -7,26 +12,30 @@ const utils = @import("utils.zig");
 
 const Lua = @This();
 
+/// The internal lua state
 L: *lua.lua_State,
+/// Allocator for the state
 allocator: *std.mem.Allocator,
+/// Diagnostics for the state
 diag: Diag,
 
-pub const InitError = std.mem.Allocator.Error || error{
-    LuaError,
-};
-
+/// Options for modulating the creation of
+/// a state.
 pub const InitOptions = struct {
     load_libraries: utils.LuaLibs = .all,
     preload_libraries: utils.LuaLibs = .none,
 };
 
-pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!Lua {
+/// Creates a new lua state from the given allocator
+/// and options. Will only fail in the case of an OOM
+pub fn init(allocator: std.mem.Allocator, options: InitOptions) std.mem.Allocator.Error!Lua {
     const alloc_ptr = try allocator.create(std.mem.Allocator);
     alloc_ptr.* = allocator;
 
-    const new_state = lua.lua_newstate(&utils.luaAlloc, alloc_ptr, 0);
+    const new_state = lua.lua_newstate(&utils.__alloc, alloc_ptr, 0);
+    // Spec guarantees that newstate will only fail if OOM
     if (new_state == null)
-        return error.LuaError;
+        return error.OutOfMemory;
 
     lua.luaL_openselectedlibs(
         new_state,
@@ -41,7 +50,9 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!Lua {
     };
 }
 
-pub fn loadFromReader(self: *@This(), reader: std.Io.Reader) utils.LuaError!void {
+/// Loads a lua text or binary from an Io.Reader.
+/// Lua determines if it is a binary or text.
+pub fn loadFromReader(self: *@This(), reader: std.Io.Reader) utils.Error!void {
     var buff: [64]u8 = undefined;
     var ud: utils.IoReaderUserData = .{
         .reader = reader,
@@ -52,7 +63,7 @@ pub fn loadFromReader(self: *@This(), reader: std.Io.Reader) utils.LuaError!void
         self.L,
         lua.lua_load(
             self.L,
-            &utils.luaIOReader,
+            &utils.__IoReader,
             &ud,
             "lua.zig io-reader",
             null,
@@ -63,9 +74,9 @@ pub fn loadFromReader(self: *@This(), reader: std.Io.Reader) utils.LuaError!void
 pub const CallError = error{
     NotAFunction,
     NotFound,
-} || utils.LuaError;
+} || utils.Error;
 
-pub fn call(self: *@This(), name: ?[*c]const u8) CallError!void {
+pub fn callRaw(self: *@This(), name: ?[*c]const u8) CallError!void {
     if (name) |function_name| {
         const t: utils.Type = @enumFromInt(lua.lua_getglobal(self.L, function_name));
 
@@ -84,6 +95,8 @@ pub fn call(self: *@This(), name: ?[*c]const u8) CallError!void {
     );
 }
 
+/// Destroys and frees any allocation done
+/// by the state
 pub fn deinit(self: *@This()) void {
     lua.lua_close(self.L);
     self.allocator.destroy(self.allocator);
