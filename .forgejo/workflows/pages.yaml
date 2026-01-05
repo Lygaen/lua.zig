@@ -11,6 +11,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: https://codeberg.org/mlugg/setup-zig@v2
       - run: zig build docs
+        timeout-minutes: 60
       - uses: actions/git-pages@v2
         with:
           site: https://mathieu_cayeux.codeberg.page/lua.zig/
