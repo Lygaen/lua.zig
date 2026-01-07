@@ -22,6 +22,35 @@ pub const Type = enum(u8) {
     userdata = lua.LUA_TUSERDATA,
     thread = lua.LUA_TTHREAD,
     light_userdata = lua.LUA_TLIGHTUSERDATA,
+
+    /// Try to guess the relevant Lua type from
+    /// a Zig type. Here's the guesses
+    ///     - int/float/comptime_* -> number
+    ///     - bool -> boolean
+    ///     - null -> nil
+    ///     - pointer to some u8 -> string
+    ///     - pointer matching lua.lua_CFunction -> function
+    ///     - struct -> table
+    ///     - undefined, noreturn, void, ... -> compile error
+    pub fn fromType(comptime T: type) Type {
+        return switch (@typeInfo(T)) {
+            .null => .nil,
+            .int, .comptime_int, .float, .comptime_float => .number,
+            .bool => .boolean,
+            .pointer => |ptr| {
+                if (ptr.child == u8) {
+                    return .string;
+                }
+                if (T == lua.lua_CFunction) {
+                    return .function;
+                }
+
+                @compileError("Pointers to '" ++ @typeName(T) ++ "' are not supported");
+            },
+            .@"struct" => .table,
+            else => @compileError("Unsupported Type"),
+        };
+    }
 };
 
 /// Representation of the standard libaries

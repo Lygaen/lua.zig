@@ -71,14 +71,191 @@ pub fn loadFromReader(self: *@This(), reader: std.Io.Reader) utils.Error!void {
     );
 }
 
+/// Dupes a string to a c-compatible string.
+/// Caller owns memory.
+fn stringToCString(self: *@This(), str: []const u8) std.mem.Allocator.Error![:0]const u8 {
+    return self.allocator.dupeZ(u8, str);
+}
+
+/// Pushes a value, duplicating it using the allocator
+/// only in the case of a string.
+/// See `Type.fromType` for type coercion depending on the zig type.
+pub fn pushValue(self: *@This(), comptime T: type, value: T) std.mem.Allocator.Error!void {
+    const lua_t: utils.Type = comptime .fromType(T);
+    const t_info = @typeInfo(T);
+
+    switch (lua_t) {
+        .nil => lua.lua_pushnil(self.L),
+        .number => {
+            if (t_info == .int or t_info == .comptime_int) {
+                lua.lua_pushnumber(self.L, @floatFromInt(value));
+            } else {
+                lua.lua_pushnumber(self.L, @floatCast(value));
+            }
+        },
+        .boolean => lua.lua_pushboolean(self.L, @intFromBool(value)),
+        .string => {
+            const str: []const u8 = blk: {
+                if (t_info.pointer.sentinel_ptr != null) {
+                    break :blk std.mem.span(value);
+                }
+
+                break :blk value;
+            };
+            const c_str = try self.allocator.dupeZ(u8, str);
+
+            _ = lua.lua_pushexternalstring(self.L, c_str, value.len, &utils.__alloc, self.allocator);
+        },
+        .function => {
+            lua.lua_pushcclosure(self.L, value, @as(c_int, 0));
+        },
+        else => @compileError("Invalid type"),
+    }
+}
+
+/// Represents an error while trying to pop a value
+pub const PopError = error{
+    InvalidPopType,
+    OutOfBounds,
+} || std.mem.Allocator.Error;
+
+/// Pop the top value from the stack, trying to pop void is a no-op.
+/// If value is a string, caller owns the memory and must free with lua.allocator
+/// This will pop the top value if the type match (eg. no `error.InvalidPopType`
+/// thrown), even if there is an oom / oob error.
+pub fn popValue(self: *@This(), comptime T: type) PopError!T {
+    if (T == void)
+        return;
+
+    const stack_top = lua.lua_gettop(self.L);
+    const pop_type: utils.Type = @enumFromInt(lua.lua_type(self.L, stack_top));
+
+    if (pop_type != utils.Type.fromType(T)) {
+        return error.InvalidPopType;
+    }
+
+    // Pop the value even if an error occured
+    defer lua.lua_pop(self.L, stack_top);
+
+    return switch (comptime utils.Type.fromType(T)) {
+        .boolean => lua.lua_toboolean(self.L, stack_top) != 0,
+        .nil => null,
+        .number => {
+            const num = lua.lua_tonumberx(self.L, stack_top, null);
+            const t_info = @typeInfo(T);
+
+            if (t_info == .int) {
+                return @intFromFloat(num);
+            }
+
+            if (t_info == .float) {
+                return @floatCast(num);
+            }
+
+            @compileError("Popping a value doesn't support compile time int/floats");
+        },
+        .string => {
+            const c_str = lua.lua_tostring(self.L, stack_top);
+            return try self.allocator.dupe(u8, std.mem.span(c_str orelse ""));
+        },
+        .function => {
+            return lua.lua_tocfunction(self.L, stack_top);
+        },
+        else => @compileError("Invalid type"),
+    };
+}
+
 pub const CallError = error{
     NotAFunction,
     NotFound,
-} || utils.Error;
+} || PopError || utils.Error || std.mem.Allocator.Error;
 
-pub fn callRaw(self: *@This(), name: ?[*c]const u8) CallError!void {
+/// Runs the currently loaded script. Does no checking on the values,
+/// is UB if nothing is currently on the stack.
+pub fn run(self: *@This()) CallError!void {
+    try self.call(null, .{}, void);
+}
+
+/// Calls for a specific lua function.
+/// This can be called as such :
+/// ```
+/// // Equivalent to lua.run()
+/// lua.call(null, .{}, void);
+///
+/// // Equivalent to 'invoking' the lua code `const ret = my_function(2,3)`
+/// const ret = lua.call("my_function", .{2, 3}, u32);
+///
+/// // Multiple return values
+/// const quotient, const mod = lua.call("div", .{10, 7}, .{u32, u32});
+/// ```
+///
+/// For the return values, caller owns memory iff it is a string. The rest
+/// is on the stack as usual.
+pub fn call(
+    self: *@This(),
+    /// Name of the function or null to run the bare code
+    name: ?[]const u8,
+    /// Arguments to be passed, should be a tuple of values
+    args: anytype,
+    /// The return type, either a tuple or a type
+    comptime ReturnType: anytype,
+) CallError!ReturnType {
+    const ArgsT = @TypeOf(args);
+
+    if (@typeInfo(ArgsT) != .@"struct" or !@typeInfo(ArgsT).@"struct".is_tuple)
+        @compileError("Args is not a tuple");
+    const t_info = @typeInfo(ArgsT).@"struct";
+
+    const ArgsTypes: [t_info.fields.len]type = comptime blk: {
+        var temp: [t_info.fields.len]type = undefined;
+        for (t_info.fields, 0..) |field, index| {
+            temp[index] = field.type;
+        }
+
+        break :blk temp;
+    };
+
+    const return_type_length, const is_simple = comptime blk: {
+        const ret_type_info = @typeInfo(@TypeOf(ReturnType));
+        if (ret_type_info == .type) {
+            if (ReturnType == void) {
+                break :blk .{ 0, true };
+            }
+            break :blk .{ 1, true };
+        }
+
+        if (ret_type_info != .@"struct" or !ret_type_info.@"struct".is_tuple)
+            @compileError("ReturnType must be a type or a tuple of types");
+
+        for (ReturnType) |ret_type| {
+            if (@typeInfo(@TypeOf(ret_type)) != .type)
+                @compileError("ReturnType must be a type or a tuple of types");
+        }
+
+        return .{ ret_type_info.@"struct".fields.len, false };
+    };
+
+    const ReturnTypes: [return_type_length]type = comptime blk: {
+        var temp: [return_type_length]type = undefined;
+
+        if (is_simple) {
+            if (return_type_length > 0) {
+                temp[0] = ReturnType;
+            }
+            break :blk temp;
+        }
+
+        for (ReturnType, 0..) |T, index| {
+            temp[index] = T;
+        }
+
+        break :blk temp;
+    };
+
     if (name) |function_name| {
-        const t: utils.Type = @enumFromInt(lua.lua_getglobal(self.L, function_name));
+        const c_name = try self.stringToCString(function_name);
+        defer self.allocator.free(c_name);
+        const t: utils.Type = @enumFromInt(lua.lua_getglobal(self.L, c_name));
 
         if (t == .nil) {
             return error.NotFound;
@@ -89,10 +266,33 @@ pub fn callRaw(self: *@This(), name: ?[*c]const u8) CallError!void {
         }
     }
 
+    // Push arguments
+    inline for (ArgsTypes, args) |ArgT, arg| {
+        try self.pushValue(ArgT, arg);
+    }
+
     try self.diag.luaToDiag(
         self.L,
-        lua.lua_pcallk(self.L, 0, lua.LUA_MULTRET, 0, 0, null),
+        lua.lua_pcallk(
+            self.L,
+            ArgsTypes.len,
+            ReturnTypes.len,
+            0,
+            0,
+            null,
+        ),
     );
+
+    if (is_simple) {
+        return try self.popValue(ReturnType);
+    }
+
+    var temp: ReturnType = undefined;
+    inline for (ReturnTypes, 0..) |RT, i| {
+        temp[i] = try self.popValue(RT);
+    }
+
+    return temp;
 }
 
 /// Destroys and frees any allocation done

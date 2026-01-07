@@ -3,7 +3,10 @@ const std = @import("std");
 const lua = @import("lua-zig");
 
 const LUA_PROGRAM =
-    \\ print("Hello World !")
+    \\function multiply(x, y)
+    \\    local z = x * y
+    \\    return z
+    \\end
 ;
 
 pub fn main() !void {
@@ -21,5 +24,10 @@ pub fn main() !void {
 
     const reader = std.Io.Reader.fixed(LUA_PROGRAM);
     try state.loadFromReader(reader);
-    try state.callRaw(null);
+    // The program must be ran once to load symbols
+    try state.run();
+
+    const ret = try state.call("multiply", .{ 2, 3 }, u32);
+
+    std.log.debug("2 * 3 = {}", .{ret});
 }
