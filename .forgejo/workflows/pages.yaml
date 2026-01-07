@@ -6,7 +6,7 @@ on:
 
 jobs:
   publish:
-    runs-on: codeberg-tiny
+    runs-on: codeberg-medium
     steps:
       - uses: actions/checkout@v5
       - uses: https://codeberg.org/mlugg/setup-zig@v2
