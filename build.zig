@@ -12,8 +12,9 @@ pub fn build(b: *std.Build) void {
 
     const check_step = b.step("check", "Checks that everything compiles");
     const skip_zig = b.option(bool, "skip-zig", "Skip any zig related stuff, does a generic lua build") orelse false;
+    const skip_lua_exes = b.option(bool, "skip-lua-exes", "Skip any lua exes compilation (useful if missing deps)") orelse false;
 
-    const lua_lib: BuildLua = .init(b, target, optimize);
+    const lua_lib: BuildLua = .init(b, target, optimize, skip_lua_exes);
     lua_lib.install(b);
 
     if (skip_zig)

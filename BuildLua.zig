@@ -3,17 +3,24 @@ const std = @import("std");
 lua_lib: *std.Build.Step.Compile,
 target: std.Build.ResolvedTarget,
 optimize: std.builtin.OptimizeMode,
+bins: ?struct {
+    lua: *std.Build.Step.Compile,
+    luac: *std.Build.Step.Compile,
+},
+
+const LUA_VERSION = std.SemanticVersion.parse("5.5.0") catch unreachable;
 
 pub fn init(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    build_bins: bool,
 ) @This() {
     const lua = b.dependency("lua", .{});
 
     const lua_lib = b.addLibrary(.{
         .name = "lua",
-        .version = std.SemanticVersion.parse("5.5.0") catch unreachable,
+        .version = LUA_VERSION,
         .root_module = b.createModule(.{
             .optimize = optimize,
             .target = target,
@@ -27,7 +34,7 @@ pub fn init(
         else => {},
     }
 
-    addLuaFlagsAndDeps(target, lua_lib.root_module);
+    addLuaFlags(target, lua_lib.root_module);
 
     if (optimize == .Debug) {
         lua_lib.root_module.addCMacro("LUA_USE_APICHECK", "");
@@ -38,11 +45,66 @@ pub fn init(
         .files = &LUA_C_FILES,
     });
 
-    return .{
+    var temp: @This() = .{
         .lua_lib = lua_lib,
         .target = target,
         .optimize = optimize,
+        .bins = null,
     };
+
+    if (build_bins) {
+        temp.bins = .{
+            .lua = temp.createLuaBin(b, .lua),
+            .luac = temp.createLuaBin(b, .luac),
+        };
+    }
+
+    return temp;
+}
+
+fn createLuaBin(
+    self: *@This(),
+    b: *std.Build,
+    name: enum {
+        lua,
+        luac,
+    },
+) *std.Build.Step.Compile {
+    const lua = b.dependency("lua", .{});
+
+    const bin = b.addExecutable(.{
+        .name = @tagName(name),
+        .version = LUA_VERSION,
+        .root_module = b.createModule(.{
+            .optimize = self.optimize,
+            .target = self.target,
+        }),
+    });
+
+    const name_c = b.fmt("{s}.c", .{@tagName(name)});
+    bin.root_module.addCSourceFile(.{
+        .file = lua.path(b.pathJoin(&.{ "src", name_c })),
+    });
+    addLuaFlags(self.target, bin.root_module);
+    bin.root_module.linkLibrary(self.lua_lib);
+
+    switch (self.target.result.os.tag) {
+        .openbsd, .netbsd, .freebsd => {
+            bin.root_module.linkSystemLibrary("edit", .{});
+            bin.root_module.linkSystemLibrary("edit", .{});
+        },
+        .linux => {
+            bin.root_module.linkSystemLibrary("dl", .{});
+            bin.root_module.linkSystemLibrary("edit", .{});
+        },
+        .macos => {
+            bin.root_module.linkSystemLibrary("readline", .{});
+            bin.root_module.linkSystemLibrary("edit", .{});
+        },
+        else => {},
+    }
+
+    return bin;
 }
 
 pub fn install(self: @This(), b: *std.Build) void {
@@ -72,6 +134,12 @@ pub fn install(self: @This(), b: *std.Build) void {
         );
         b.getInstallStep().dependOn(&install_file.step);
     }
+
+    // Install bins
+    if (self.bins) |bins| {
+        b.installArtifact(bins.lua);
+        b.installArtifact(bins.luac);
+    }
 }
 
 /// Returns and exposes the lua translate c module under `lua.c`
@@ -93,7 +161,7 @@ pub fn toModule(self: @This(), b: *std.Build) *std.Build.Module {
     return lua_mod;
 }
 
-fn addLuaFlagsAndDeps(target: std.Build.ResolvedTarget, module: *std.Build.Module) void {
+fn addLuaFlags(target: std.Build.ResolvedTarget, module: *std.Build.Module) void {
     switch (target.result.os.tag) {
         .openbsd, .netbsd, .freebsd => {
             module.addCMacro("LUA_USE_LINUX", "");
