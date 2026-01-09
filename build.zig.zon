@@ -1,6 +1,6 @@
 .{
     .name = .lua_zig,
-    .version = "0.0.1",
+    .version = "0.0.2",
     .dependencies = .{
         .lua = .{
             .url = "https://www.lua.org/ftp/lua-5.5.0.tar.gz",
