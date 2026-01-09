@@ -1,0 +1,181 @@
+const std = @import("std");
+
+lua_lib: *std.Build.Step.Compile,
+target: std.Build.ResolvedTarget,
+optimize: std.builtin.OptimizeMode,
+
+pub fn init(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) @This() {
+    const lua = b.dependency("lua", .{});
+
+    const lua_lib = b.addLibrary(.{
+        .name = "lua",
+        .version = std.SemanticVersion.parse("5.5.0") catch unreachable,
+        .root_module = b.createModule(.{
+            .optimize = optimize,
+            .target = target,
+        }),
+    });
+
+    switch (target.result.os.tag) {
+        .openbsd, .netbsd, .freebsd, .linux, .macos => {
+            lua_lib.rdynamic = true;
+        },
+        else => {},
+    }
+
+    addLuaFlagsAndDeps(target, lua_lib.root_module);
+
+    if (optimize == .Debug) {
+        lua_lib.root_module.addCMacro("LUA_USE_APICHECK", "");
+    }
+
+    lua_lib.root_module.addCSourceFiles(.{
+        .root = lua.path("src/"),
+        .files = &LUA_C_FILES,
+    });
+
+    return .{
+        .lua_lib = lua_lib,
+        .target = target,
+        .optimize = optimize,
+    };
+}
+
+pub fn install(self: @This(), b: *std.Build) void {
+    const lua = b.dependency("lua", .{});
+
+    // Install lib to PREFIX/lib/*
+    b.getInstallStep().dependOn(
+        &b.addInstallArtifact(self.lua_lib, .{}).step,
+    );
+
+    // Install headers to PREFIX/include/*
+    for (LUA_H_FILES) |lua_h_file| {
+        const install_file = b.addInstallFileWithDir(
+            lua.path(b.pathJoin(&.{ "src", lua_h_file })),
+            .{ .custom = "include" },
+            lua_h_file,
+        );
+        b.getInstallStep().dependOn(&install_file.step);
+    }
+
+    // Install man-pages to PREFIX/man/man1/*
+    for (MAN_FILES) |man_file| {
+        const install_file = b.addInstallFileWithDir(
+            lua.path(b.pathJoin(&.{ "doc", man_file })),
+            .{ .custom = "man/man1" },
+            man_file,
+        );
+        b.getInstallStep().dependOn(&install_file.step);
+    }
+}
+
+/// Returns and exposes the lua translate c module under `lua.c`
+pub fn toModule(self: @This(), b: *std.Build) *std.Build.Module {
+    const lua = b.dependency("lua", .{});
+    const write_files = b.addWriteFiles();
+    const lua_all_path = write_files.add("lua_all.h", LUA_ALL_H);
+
+    const lua_trans = b.addTranslateC(.{
+        .root_source_file = lua_all_path,
+        .optimize = self.optimize,
+        .target = self.target,
+    });
+
+    lua_trans.addIncludePath(lua.path("src/"));
+    const lua_mod = lua_trans.addModule("lua.c");
+    lua_mod.linkLibrary(self.lua_lib);
+
+    return lua_mod;
+}
+
+fn addLuaFlagsAndDeps(target: std.Build.ResolvedTarget, module: *std.Build.Module) void {
+    switch (target.result.os.tag) {
+        .openbsd, .netbsd, .freebsd => {
+            module.addCMacro("LUA_USE_LINUX", "");
+            module.addCMacro("LUA_USE_READLINE", "");
+            module.linkSystemLibrary("edit", .{});
+        },
+        .ios => {
+            module.addCMacro("LUA_USE_IOS", "");
+        },
+        .linux => {
+            module.addCMacro("LUA_USE_LINUX", "");
+            module.linkSystemLibrary("dl", .{});
+        },
+        .macos => {
+            module.addCMacro("LUA_USE_MACOSX", "");
+            module.addCMacro("LUA_USE_READLINE", "");
+            module.linkSystemLibrary("readline", .{});
+        },
+        .windows => {
+            module.addCMacro("LUA_BUILD_AS_DLL", "");
+        },
+        else => {
+            module.addCMacro("LUA_USE_POSIX", "");
+        },
+    }
+}
+
+const LUA_C_FILES = [_][]const u8{
+    "lapi.c",
+    "lauxlib.c",
+    "lbaselib.c",
+    "lcode.c",
+    "lcorolib.c",
+    "lctype.c",
+    "ldblib.c",
+    "ldebug.c",
+    "ldo.c",
+    "ldump.c",
+    "lfunc.c",
+    "lgc.c",
+    "linit.c",
+    "liolib.c",
+    "llex.c",
+    "lmathlib.c",
+    "lmem.c",
+    "loadlib.c",
+    "lobject.c",
+    "lopcodes.c",
+    "loslib.c",
+    "lparser.c",
+    "lstate.c",
+    "lstring.c",
+    "lstrlib.c",
+    "ltable.c",
+    "ltablib.c",
+    "ltm.c",
+    "lundump.c",
+    "lutf8lib.c",
+    "lvm.c",
+    "lzio.c",
+};
+
+const LUA_H_FILES = [_][]const u8{
+    "lua.h",
+    "luaconf.h",
+    "lualib.h",
+    "lauxlib.h",
+    "lua.hpp",
+};
+
+const MAN_FILES = [_][]const u8{
+    "lua.1", "luac.1",
+};
+
+const LUA_ALL_H =
+    \\#ifndef __LUA_ALL_H__
+    \\#define __LUA_ALL_H__
+    \\
+    \\#include "luaconf.h"
+    \\#include "lua.h"
+    \\#include "lualib.h"
+    \\#include "lauxlib.h"
+    \\
+    \\#endif // __LUA_ALL_H__
+;
