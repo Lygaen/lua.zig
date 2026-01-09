@@ -71,8 +71,11 @@ pub fn generateLuaModule(
 ) void {
     const lua = b.dependency("lua", .{});
 
+    const write_files = b.addWriteFiles();
+    const lua_all_path = write_files.add("lua_all.h", LUA_ALL_H);
+
     const lua_trans = b.addTranslateC(.{
-        .root_source_file = b.path("lua_all.h"),
+        .root_source_file = lua_all_path,
         .optimize = optimize,
         .target = target,
     });
@@ -161,9 +164,20 @@ const LUA_C_FILES = [_][]const u8{
     "ltable.c",
     "ltablib.c",
     "ltm.c",
-
     "lundump.c",
     "lutf8lib.c",
     "lvm.c",
     "lzio.c",
 };
+
+const LUA_ALL_H =
+    \\#ifndef __LUA_ALL_H__
+    \\#define __LUA_ALL_H__
+    \\
+    \\#include "luaconf.h"
+    \\#include "lua.h"
+    \\#include "lualib.h"
+    \\#include "lauxlib.h"
+    \\
+    \\#endif // __LUA_ALL_H__
+;
