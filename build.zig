@@ -16,10 +16,10 @@ pub fn build(b: *std.Build) void {
     const lua_lib: BuildLua = .init(b, target, optimize);
     lua_lib.install(b);
 
-    const lua_c = lua_lib.toModule(b);
-
     if (skip_zig)
         return;
+
+    const lua_c = lua_lib.toModule(b);
 
     // Library
     const lib_mod = b.addModule("lua.zig", .{
