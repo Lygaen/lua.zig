@@ -3,7 +3,7 @@ const std = @import("std");
 lua_lib: *std.Build.Step.Compile,
 target: std.Build.ResolvedTarget,
 optimize: std.builtin.OptimizeMode,
-bins: ?struct {
+exes: ?struct {
     lua: *std.Build.Step.Compile,
     luac: *std.Build.Step.Compile,
 },
@@ -49,11 +49,11 @@ pub fn init(
         .lua_lib = lua_lib,
         .target = target,
         .optimize = optimize,
-        .bins = null,
+        .exes = null,
     };
 
     if (build_bins) {
-        temp.bins = .{
+        temp.exes = .{
             .lua = temp.createLuaBin(b, .lua),
             .luac = temp.createLuaBin(b, .luac),
         };
@@ -125,20 +125,19 @@ pub fn install(self: @This(), b: *std.Build) void {
         b.getInstallStep().dependOn(&install_file.step);
     }
 
-    // Install man-pages to PREFIX/man/man1/*
-    for (MAN_FILES) |man_file| {
-        const install_file = b.addInstallFileWithDir(
-            lua.path(b.pathJoin(&.{ "doc", man_file })),
-            .{ .custom = "man/man1" },
-            man_file,
-        );
-        b.getInstallStep().dependOn(&install_file.step);
-    }
+    // Install bins and their man pages
+    if (self.exes) |exes| {
+        for (MAN_FILES) |man_file| {
+            const install_file = b.addInstallFileWithDir(
+                lua.path(b.pathJoin(&.{ "doc", man_file })),
+                .{ .custom = "man/man1" },
+                man_file,
+            );
+            b.getInstallStep().dependOn(&install_file.step);
+        }
 
-    // Install bins
-    if (self.bins) |bins| {
-        b.installArtifact(bins.lua);
-        b.installArtifact(bins.luac);
+        b.installArtifact(exes.lua);
+        b.installArtifact(exes.luac);
     }
 }
 
