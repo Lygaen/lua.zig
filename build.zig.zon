@@ -8,6 +8,12 @@
         },
     },
     .minimum_zig_version = "0.16.0-dev.1859+212968c57",
-    .paths = .{""},
+    .paths = .{
+        "build.zig",
+        "BuildLua.zig",
+        "build.zig.zon",
+        "src",
+        "examples",
+    },
     .fingerprint = 0x8326ed077d5d01f8,
 }
