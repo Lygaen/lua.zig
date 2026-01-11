@@ -8,7 +8,7 @@ const std = @import("std");
 const lua = @import("lua.c");
 
 const definitions = @import("definitions.zig");
-const Diag = @import("Diag.zig");
+const Diagnostics = @import("Diagnostics.zig");
 
 const Lua = @This();
 
@@ -17,7 +17,7 @@ L: *lua.lua_State,
 /// Allocator for the state
 allocator: *std.mem.Allocator,
 /// Diagnostics for the state
-diag: Diag,
+diag: Diagnostics,
 
 /// Options for modulating the creation of
 /// a state.
@@ -59,7 +59,7 @@ pub fn loadFromReader(self: *@This(), reader: std.Io.Reader) definitions.Error!v
         .buffer = &buff,
     };
 
-    try self.diag.luaToDiag(
+    try self.diag.luaToDiagnostics(
         self.L,
         lua.lua_load(
             self.L,
@@ -271,7 +271,7 @@ pub fn call(
         try self.pushValue(ArgT, arg);
     }
 
-    try self.diag.luaToDiag(
+    try self.diag.luaToDiagnostics(
         self.L,
         lua.lua_pcallk(
             self.L,

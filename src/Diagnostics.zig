@@ -31,7 +31,7 @@ pub fn luaErr(status: c_int) definitions.Error!void {
 /// Stores a diagnostics from the given lua state and
 /// status. Doesn't do anything if status is LUA_OK
 /// or if the status is out of bounds.
-pub fn luaToDiag(diagnostics: *@This(), L: *lua.lua_State, status: c_int) definitions.Error!void {
+pub fn luaToDiagnostics(diagnostics: *@This(), L: *lua.lua_State, status: c_int) definitions.Error!void {
     luaErr(status) catch |err| {
         diagnostics.err = err;
         diagnostics.message = lua.lua_tolstring(L, -1, null);
