@@ -6,7 +6,7 @@ const std = @import("std");
 
 const lua = @import("lua.c");
 
-const utils = @import("utils.zig");
+const definitions = @import("definitions.zig");
 
 /// The human-friendly message of the error
 message: [*c]const u8 = "",
@@ -16,7 +16,7 @@ err: ?anyerror = null,
 /// Generate a zig error from the given lua status,
 /// with the case that status is out of bounds
 /// returning void as well.
-pub fn luaErr(status: c_int) utils.Error!void {
+pub fn luaErr(status: c_int) definitions.Error!void {
     return switch (status) {
         lua.LUA_OK => {},
         lua.LUA_YIELD => error.Yield,
@@ -31,7 +31,7 @@ pub fn luaErr(status: c_int) utils.Error!void {
 /// Stores a diagnostics from the given lua state and
 /// status. Doesn't do anything if status is LUA_OK
 /// or if the status is out of bounds.
-pub fn luaToDiag(diagnostics: *@This(), L: *lua.lua_State, status: c_int) utils.Error!void {
+pub fn luaToDiag(diagnostics: *@This(), L: *lua.lua_State, status: c_int) definitions.Error!void {
     luaErr(status) catch |err| {
         diagnostics.err = err;
         diagnostics.message = lua.lua_tolstring(L, -1, null);

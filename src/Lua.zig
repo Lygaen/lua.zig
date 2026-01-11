@@ -7,8 +7,8 @@ const std = @import("std");
 
 const lua = @import("lua.c");
 
+const definitions = @import("definitions.zig");
 const Diag = @import("Diag.zig");
-const utils = @import("utils.zig");
 
 const Lua = @This();
 
@@ -22,8 +22,8 @@ diag: Diag,
 /// Options for modulating the creation of
 /// a state.
 pub const InitOptions = struct {
-    load_libraries: utils.LuaLibs = .all,
-    preload_libraries: utils.LuaLibs = .none,
+    load_libraries: definitions.Libraries = .all,
+    preload_libraries: definitions.Libraries = .none,
 };
 
 /// Creates a new lua state from the given allocator
@@ -32,7 +32,7 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) std.mem.Allocato
     const alloc_ptr = try allocator.create(std.mem.Allocator);
     alloc_ptr.* = allocator;
 
-    const new_state = lua.lua_newstate(&utils.__alloc, alloc_ptr, 0);
+    const new_state = lua.lua_newstate(&definitions.__alloc, alloc_ptr, 0);
     // Spec guarantees that newstate will only fail if OOM
     if (new_state == null)
         return error.OutOfMemory;
@@ -52,9 +52,9 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) std.mem.Allocato
 
 /// Loads a lua text or binary from an Io.Reader.
 /// Lua determines if it is a binary or text.
-pub fn loadFromReader(self: *@This(), reader: std.Io.Reader) utils.Error!void {
+pub fn loadFromReader(self: *@This(), reader: std.Io.Reader) definitions.Error!void {
     var buff: [64]u8 = undefined;
-    var ud: utils.IoReaderUserData = .{
+    var ud: definitions.IoReaderUserData = .{
         .reader = reader,
         .buffer = &buff,
     };
@@ -63,7 +63,7 @@ pub fn loadFromReader(self: *@This(), reader: std.Io.Reader) utils.Error!void {
         self.L,
         lua.lua_load(
             self.L,
-            &utils.__IoReader,
+            &definitions.__IoReader,
             &ud,
             "lua.zig io-reader",
             null,
@@ -81,7 +81,7 @@ fn stringToCString(self: *@This(), str: []const u8) std.mem.Allocator.Error![:0]
 /// only in the case of a string.
 /// See `Type.fromType` for type coercion depending on the zig type.
 pub fn pushValue(self: *@This(), comptime T: type, value: T) std.mem.Allocator.Error!void {
-    const lua_t: utils.Type = comptime .fromType(T);
+    const lua_t: definitions.Type = comptime .fromType(T);
     const t_info = @typeInfo(T);
 
     switch (lua_t) {
@@ -104,7 +104,7 @@ pub fn pushValue(self: *@This(), comptime T: type, value: T) std.mem.Allocator.E
             };
             const c_str = try self.allocator.dupeZ(u8, str);
 
-            _ = lua.lua_pushexternalstring(self.L, c_str, value.len, &utils.__alloc, self.allocator);
+            _ = lua.lua_pushexternalstring(self.L, c_str, value.len, &definitions.__alloc, self.allocator);
         },
         .function => {
             lua.lua_pushcclosure(self.L, value, @as(c_int, 0));
@@ -128,16 +128,16 @@ pub fn popValue(self: *@This(), comptime T: type) PopError!T {
         return;
 
     const stack_top = lua.lua_gettop(self.L);
-    const pop_type: utils.Type = @enumFromInt(lua.lua_type(self.L, stack_top));
+    const pop_type: definitions.Type = @enumFromInt(lua.lua_type(self.L, stack_top));
 
-    if (pop_type != utils.Type.fromType(T)) {
+    if (pop_type != definitions.Type.fromType(T)) {
         return error.InvalidPopType;
     }
 
     // Pop the value even if an error occured
     defer lua.lua_pop(self.L, stack_top);
 
-    return switch (comptime utils.Type.fromType(T)) {
+    return switch (comptime definitions.Type.fromType(T)) {
         .boolean => lua.lua_toboolean(self.L, stack_top) != 0,
         .nil => null,
         .number => {
@@ -168,7 +168,7 @@ pub fn popValue(self: *@This(), comptime T: type) PopError!T {
 pub const CallError = error{
     NotAFunction,
     NotFound,
-} || PopError || utils.Error || std.mem.Allocator.Error;
+} || PopError || definitions.Error || std.mem.Allocator.Error;
 
 /// Runs the currently loaded script. Does no checking on the values,
 /// is UB if nothing is currently on the stack.
@@ -255,7 +255,7 @@ pub fn call(
     if (name) |function_name| {
         const c_name = try self.stringToCString(function_name);
         defer self.allocator.free(c_name);
-        const t: utils.Type = @enumFromInt(lua.lua_getglobal(self.L, c_name));
+        const t: definitions.Type = @enumFromInt(lua.lua_getglobal(self.L, c_name));
 
         if (t == .nil) {
             return error.NotFound;

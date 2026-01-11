@@ -1,8 +1,5 @@
-//! This file regroups a bunch of utilities and
-//! definitions used all throughout the Lua Library.
-//!
-//! I know I shouldn't use a utils file but for the time
-//! being I is what it is.
+//! This file regroups basic definitions that are used
+//! over all of the project.
 
 const std = @import("std");
 
@@ -59,7 +56,7 @@ pub const Type = enum(u8) {
 /// Mainly used for allowing the user to represent
 /// which specific libraries to open during
 /// the init process.
-pub const LuaLibs = packed struct(c_int) {
+pub const Libraries = packed struct(c_int) {
     /// The basic library, it provides core symbols to lua :
     ///     - `assert` / `error` / `warn` / `print`
     ///     - `collectgarbage` / `_G`

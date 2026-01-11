@@ -41,6 +41,6 @@
 //! }
 //! ```
 
+pub const definitions = @import("definitions.zig");
 pub const Diag = @import("Diag.zig");
 pub const Lua = @import("Lua.zig");
-pub const utils = @import("utils.zig");
