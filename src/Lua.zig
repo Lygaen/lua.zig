@@ -9,6 +9,7 @@ const lua = @import("lua.c");
 
 const definitions = @import("definitions.zig");
 const Diagnostics = @import("Diagnostics.zig");
+const register = @import("register.zig");
 
 const Lua = @This();
 
@@ -106,9 +107,6 @@ pub fn pushValue(self: *@This(), comptime T: type, value: T) std.mem.Allocator.E
 
             _ = lua.lua_pushexternalstring(self.L, c_str, value.len, &definitions.__alloc, self.allocator);
         },
-        .function => {
-            lua.lua_pushcclosure(self.L, value, @as(c_int, 0));
-        },
         else => @compileError("Invalid type"),
     }
 }
@@ -157,9 +155,6 @@ pub fn popValue(self: *@This(), comptime T: type) PopError!T {
         .string => {
             const c_str = lua.lua_tostring(self.L, stack_top);
             return try self.allocator.dupe(u8, std.mem.span(c_str orelse ""));
-        },
-        .function => {
-            return lua.lua_tocfunction(self.L, stack_top);
         },
         else => @compileError("Invalid type"),
     };
@@ -293,6 +288,19 @@ pub fn call(
     }
 
     return temp;
+}
+
+pub fn free(self: *@This(), memory: anytype) void {
+    self.allocator.free(memory);
+}
+
+pub fn registerFunction(self: *@This(), name: []const u8, comptime func: anytype) std.mem.Allocator.Error!void {
+    register.pushFunction(self.L, func);
+
+    const c_name = try self.stringToCString(name);
+    defer self.free(c_name);
+
+    lua.lua_setglobal(self.L, c_name);
 }
 
 /// Destroys and frees any allocation done

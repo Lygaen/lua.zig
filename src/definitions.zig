@@ -45,7 +45,7 @@ pub const Type = enum(u8) {
                 @compileError("Pointers to '" ++ @typeName(T) ++ "' are not supported");
             },
             .@"struct" => .table,
-            else => @compileError("Unsupported Type"),
+            else => @compileError("Unsupported Type '" ++ @typeName(T) ++ "'"),
         };
     }
 };

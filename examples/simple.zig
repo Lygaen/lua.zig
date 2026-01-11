@@ -2,9 +2,14 @@ const std = @import("std");
 
 const lua = @import("lua-zig");
 
+fn functor(value: u32) void {
+    std.log.debug("functor({})", .{value});
+}
+
 const LUA_PROGRAM =
     \\function multiply(x, y)
     \\    local z = x * y
+    \\    functor(z)
     \\    return z
     \\end
 ;
@@ -21,6 +26,8 @@ pub fn main() !void {
             std.log.err("{}: {s}", .{ state.diag.err.?, state.diag.message });
         }
     }
+
+    try state.registerFunction("functor", functor);
 
     const reader = std.Io.Reader.fixed(LUA_PROGRAM);
     try state.loadFromReader(reader);
