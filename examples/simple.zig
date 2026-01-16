@@ -2,14 +2,16 @@ const std = @import("std");
 
 const lua = @import("lua-zig");
 
-fn functor(value: u32) void {
+fn functor(value: u32) u32 {
     std.log.debug("functor({})", .{value});
+
+    return value * value;
 }
 
 const LUA_PROGRAM =
     \\function multiply(x, y)
     \\    local z = x * y
-    \\    functor(z)
+    \\    z = functor(z)
     \\    return z
     \\end
 ;
@@ -36,5 +38,5 @@ pub fn main() !void {
 
     const ret = try state.call("multiply", .{ 2, 3 }, u32);
 
-    std.log.debug("2 * 3 = {}", .{ret});
+    std.log.debug("functor(2 * 3) = {}", .{ret});
 }
