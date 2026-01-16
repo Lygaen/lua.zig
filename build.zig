@@ -2,10 +2,6 @@ const std = @import("std");
 
 const BuildLua = @import("BuildLua.zig");
 
-const EXAMPLES_NAMES = [_][]const u8{
-    "simple",
-};
-
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -37,7 +33,19 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(lib_artifact);
     check_step.dependOn(&lib_artifact.step);
 
-    inline for (EXAMPLES_NAMES) |example_name| {
+    const cwd = std.Io.Dir.cwd().openDir(b.graph.io, "examples", .{
+        .iterate = true,
+    }) catch @panic("Could not open examples/ directory !");
+    var iter = cwd.iterateAssumeFirstIteration();
+
+    while (iter.next(b.graph.io) catch @panic("Could not walk examples/ directory !")) |entry| {
+        if (entry.kind != .file)
+            continue;
+        const filename = entry.name;
+        const example_name = std.fs.path.stem(filename);
+        const step_name = b.fmt("run-{s}", .{example_name});
+        defer b.allocator.free(step_name);
+
         const exe = b.addExecutable(.{
             .name = example_name,
             .root_module = b.addModule(example_name, .{
@@ -45,7 +53,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
                 .root_source_file = b.path(b.pathJoin(&.{
                     "examples/",
-                    example_name ++ ".zig",
+                    filename,
                 })),
             }),
             .use_llvm = true,
@@ -59,7 +67,7 @@ pub fn build(b: *std.Build) void {
         b.installArtifact(exe);
 
         const run_exe = b.addRunArtifact(exe);
-        const run_step = b.step("run-" ++ example_name, "Run the example '" ++ example_name ++ "'");
+        const run_step = b.step(step_name, "Run the example");
         run_step.dependOn(&run_exe.step);
     }
 

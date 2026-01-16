@@ -153,8 +153,10 @@ pub fn popValue(self: *@This(), comptime T: type) PopError!T {
             @compileError("Popping a value doesn't support compile time int/floats");
         },
         .string => {
-            const c_str = lua.lua_tostring(self.L, stack_top);
-            return try self.allocator.dupe(u8, std.mem.span(c_str orelse ""));
+            const c_str = lua.lua_tolstring(self.L, stack_top, null);
+            if (c_str == null)
+                return "";
+            return try self.allocator.dupe(u8, std.mem.span(c_str.?));
         },
         else => @compileError("Invalid type"),
     };

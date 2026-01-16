@@ -38,8 +38,15 @@ pub const Type = enum(u8) {
                 if (ptr.child == u8) {
                     return .string;
                 }
+
                 if (T == lua.lua_CFunction) {
                     return .function;
+                }
+
+                const child_tinfo = @typeInfo(ptr.child);
+                if (child_tinfo == .array and child_tinfo.array.child == u8) {
+                    // string literal
+                    return .string;
                 }
 
                 @compileError("Pointers to '" ++ @typeName(T) ++ "' are not supported");
