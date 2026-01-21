@@ -16,12 +16,8 @@ const LUA_PROGRAM =
     \\end
 ;
 
-pub fn main() !void {
-    var alloc: std.heap.GeneralPurposeAllocator(.{}) = .init;
-    defer _ = alloc.deinit();
-    const allocator = alloc.allocator();
-
-    var state: lua.Lua = try .init(allocator, .{});
+pub fn main(init: std.process.Init) !void {
+    var state: lua.Lua = try .init(init.gpa, .{});
     defer state.deinit();
     defer {
         if (state.diag.hasErr()) {
