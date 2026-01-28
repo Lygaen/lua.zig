@@ -277,9 +277,11 @@ pub fn free(self: *@This(), value: anytype) void {
     }
 }
 
-/// Register a function as a global symbol
-pub fn registerFunction(self: *@This(), name: []const u8, comptime func: anytype) std.mem.Allocator.Error!void {
-    stack.push(self.L, func);
+/// Register a value as a global symbol.
+/// Value can be anything from a function,
+/// table, or just a simple integer etc.
+pub fn setGlobal(self: *@This(), name: []const u8, value: anytype) std.mem.Allocator.Error!void {
+    stack.push(self.L, value);
 
     const c_name = try self.stringToCString(name);
     defer self.free(c_name);

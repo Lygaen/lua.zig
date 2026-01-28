@@ -25,7 +25,7 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    try state.registerFunction("functor", functor);
+    try state.setGlobal("functor", functor);
 
     const reader = std.Io.Reader.fixed(LUA_PROGRAM);
     try state.loadFromReader(reader);
