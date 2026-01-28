@@ -5,58 +5,6 @@ const std = @import("std");
 
 const lua = @import("lua.c");
 
-/// An enum representing possible Lua types.
-/// It is compatible with the Lua API, going
-/// from one to the other using @intFromEnum
-/// and @enumFromInt.
-pub const Type = enum(u8) {
-    nil = lua.LUA_TNIL,
-    number = lua.LUA_TNUMBER,
-    boolean = lua.LUA_TBOOLEAN,
-    string = lua.LUA_TSTRING,
-    table = lua.LUA_TTABLE,
-    function = lua.LUA_TFUNCTION,
-    userdata = lua.LUA_TUSERDATA,
-    thread = lua.LUA_TTHREAD,
-    light_userdata = lua.LUA_TLIGHTUSERDATA,
-
-    /// Try to guess the relevant Lua type from
-    /// a Zig type. Here's the guesses
-    ///     - int/float/comptime_* -> number
-    ///     - bool -> boolean
-    ///     - null -> nil
-    ///     - pointer to some u8 -> string
-    ///     - pointer matching lua.lua_CFunction -> function
-    ///     - struct -> table
-    ///     - undefined, noreturn, void, ... -> compile error
-    pub fn fromType(comptime T: type) Type {
-        return switch (@typeInfo(T)) {
-            .null => .nil,
-            .int, .comptime_int, .float, .comptime_float => .number,
-            .bool => .boolean,
-            .pointer => |ptr| {
-                if (ptr.child == u8) {
-                    return .string;
-                }
-
-                if (T == lua.lua_CFunction) {
-                    return .function;
-                }
-
-                const child_tinfo = @typeInfo(ptr.child);
-                if (child_tinfo == .array and child_tinfo.array.child == u8) {
-                    // string literal
-                    return .string;
-                }
-
-                @compileError("Pointers to '" ++ @typeName(T) ++ "' are not supported");
-            },
-            .@"struct" => .table,
-            else => @compileError("Unsupported Type '" ++ @typeName(T) ++ "'"),
-        };
-    }
-};
-
 /// Representation of the standard libaries
 /// that Lua offers to a file.
 ///

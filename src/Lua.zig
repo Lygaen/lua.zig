@@ -9,7 +9,7 @@ const lua = @import("lua.c");
 
 const definitions = @import("definitions.zig");
 const Diagnostics = @import("Diagnostics.zig");
-const register = @import("register.zig");
+const stack = @import("stack.zig");
 
 const Lua = @This();
 
@@ -78,94 +78,10 @@ fn stringToCString(self: *@This(), str: []const u8) std.mem.Allocator.Error![:0]
     return self.allocator.dupeZ(u8, str);
 }
 
-/// Pushes a value, duplicating it using the allocator
-/// only in the case of a string.
-/// See `Type.fromType` for type coercion depending on the zig type.
-pub fn pushValue(self: *@This(), comptime T: type, value: T) std.mem.Allocator.Error!void {
-    const lua_t: definitions.Type = comptime .fromType(T);
-    const t_info = @typeInfo(T);
-
-    switch (lua_t) {
-        .nil => lua.lua_pushnil(self.L),
-        .number => {
-            if (t_info == .int or t_info == .comptime_int) {
-                lua.lua_pushnumber(self.L, @floatFromInt(value));
-            } else {
-                lua.lua_pushnumber(self.L, @floatCast(value));
-            }
-        },
-        .boolean => lua.lua_pushboolean(self.L, @intFromBool(value)),
-        .string => {
-            const str: []const u8 = blk: {
-                if (t_info.pointer.sentinel_ptr != null) {
-                    break :blk std.mem.span(value);
-                }
-
-                break :blk value;
-            };
-            const c_str = try self.allocator.dupeZ(u8, str);
-
-            _ = lua.lua_pushexternalstring(self.L, c_str, value.len, &definitions.__alloc, self.allocator);
-        },
-        else => @compileError("Invalid type"),
-    }
-}
-
-/// Represents an error while trying to pop a value
-pub const PopError = error{
-    InvalidPopType,
-    OutOfBounds,
-} || std.mem.Allocator.Error;
-
-/// Pop the top value from the stack, trying to pop void is a no-op.
-/// If value is a string, caller owns the memory and must free with lua.allocator
-/// This will pop the top value if the type match (eg. no `error.InvalidPopType`
-/// thrown), even if there is an oom / oob error.
-pub fn popValue(self: *@This(), comptime T: type) PopError!T {
-    if (T == void)
-        return;
-
-    const stack_top = lua.lua_gettop(self.L);
-    const pop_type: definitions.Type = @enumFromInt(lua.lua_type(self.L, stack_top));
-
-    if (pop_type != definitions.Type.fromType(T)) {
-        return error.InvalidPopType;
-    }
-
-    // Pop the value even if an error occured
-    defer lua.lua_pop(self.L, stack_top);
-
-    return switch (comptime definitions.Type.fromType(T)) {
-        .boolean => lua.lua_toboolean(self.L, stack_top) != 0,
-        .nil => null,
-        .number => {
-            const num = lua.lua_tonumberx(self.L, stack_top, null);
-            const t_info = @typeInfo(T);
-
-            if (t_info == .int) {
-                return @intFromFloat(num);
-            }
-
-            if (t_info == .float) {
-                return @floatCast(num);
-            }
-
-            @compileError("Popping a value doesn't support compile time int/floats");
-        },
-        .string => {
-            const c_str = lua.lua_tolstring(self.L, stack_top, null);
-            if (c_str == null)
-                return "";
-            return try self.allocator.dupe(u8, std.mem.span(c_str.?));
-        },
-        else => @compileError("Invalid type"),
-    };
-}
-
 pub const CallError = error{
     NotAFunction,
     NotFound,
-} || PopError || definitions.Error || std.mem.Allocator.Error;
+} || stack.GetError || definitions.Error || std.mem.Allocator.Error;
 
 /// Runs the currently loaded script. Does no checking on the values,
 /// is UB if nothing is currently on the stack.
@@ -186,8 +102,10 @@ pub fn run(self: *@This()) CallError!void {
 /// const quotient, const mod = lua.call("div", .{10, 7}, .{u32, u32});
 /// ```
 ///
-/// For the return values, caller owns memory iff it is a string. The rest
-/// is on the stack as usual.
+/// For the return values, caller owns memory iff it is a string or the container contains
+/// one (ie struct with a string field).
+/// The rest is on the stack as usual.
+/// If in doubt, call free on it as it is a no-op on types that don't need allocation.
 pub fn call(
     self: *@This(),
     /// Name of the function or null to run the bare code
@@ -252,20 +170,20 @@ pub fn call(
     if (name) |function_name| {
         const c_name = try self.stringToCString(function_name);
         defer self.allocator.free(c_name);
-        const t: definitions.Type = @enumFromInt(lua.lua_getglobal(self.L, c_name));
+        const t = lua.lua_getglobal(self.L, c_name);
 
-        if (t == .nil) {
+        if (t == lua.LUA_TNIL) {
             return error.NotFound;
         }
 
-        if (t != .function) {
+        if (t != lua.LUA_TFUNCTION) {
             return error.NotAFunction;
         }
     }
 
     // Push arguments
-    inline for (ArgsTypes, args) |ArgT, arg| {
-        try self.pushValue(ArgT, arg);
+    inline for (args) |arg| {
+        stack.push(self.L, arg);
     }
 
     try self.diag.luaToDiagnostics(
@@ -281,23 +199,87 @@ pub fn call(
     );
 
     if (is_simple) {
-        return try self.popValue(ReturnType);
+        if (ReturnType == void)
+            return;
+
+        defer lua.lua_pop(self.L, 1);
+        return self.dupeAll(try stack.get(self.L, ReturnType, -1));
     }
 
     var temp: ReturnType = undefined;
+    const top: usize = lua.lua_gettop(self.L);
+    defer lua.lua_pop(self.L, ReturnTypes.len);
+
     inline for (ReturnTypes, 0..) |RT, i| {
-        temp[i] = try self.popValue(RT);
+        temp[i] = try stack.get(self.L, RT, top - i);
     }
 
-    return temp;
+    return try self.dupeAll(temp);
 }
 
-pub fn free(self: *@This(), memory: anytype) void {
-    self.allocator.free(memory);
+/// Dupe value if it is memory sensitive (pointer etc.)
+/// If value is a struct, dupe if needed its fields.
+fn dupeAll(self: *@This(), value: anytype) std.mem.Allocator.Error!@TypeOf(value) {
+    const T = @TypeOf(value);
+    const t_info = @typeInfo(T);
+
+    if (t_info == .pointer) {
+        const ptr = t_info.pointer;
+        if (ptr.size == .one) {
+            const temp = try self.allocator.create(ptr.child);
+            temp.* = value.*;
+            return temp;
+        }
+
+        const slice: []const ptr.child = blk: {
+            if (ptr.size == .slice)
+                break :blk value;
+
+            break :blk std.mem.span(value);
+        };
+
+        if (ptr.sentinel() != null) {
+            return try self.allocator.dupeZ(ptr.child, slice);
+        }
+
+        return try self.allocator.dupe(ptr.child, slice);
+    }
+
+    if (t_info == .@"struct") {
+        var temp: T = undefined;
+        inline for (t_info.@"struct".fields) |field| {
+            @field(temp, field.name) = try self.dupeAll(@field(value, field.name));
+        }
+        return temp;
+    }
+
+    return value;
 }
 
+/// Free any memory associated with a struct or pointer
+/// It is a no-op if the type passed should not have
+/// any memory allocated.
+pub fn free(self: *@This(), value: anytype) void {
+    const t_info = @typeInfo(@TypeOf(value));
+
+    if (t_info == .pointer) {
+        self.allocator.free(value);
+        return;
+    }
+
+    if (t_info != .@"struct")
+        return;
+
+    inline for (t_info.@"struct".fields) |field| {
+        if (comptime stack.isStringLike(field.type) and @typeInfo(field.type) == .pointer) {
+            self.free(@field(value, field.name));
+        }
+    }
+}
+
+/// Register a function as a global symbol
 pub fn registerFunction(self: *@This(), name: []const u8, comptime func: anytype) std.mem.Allocator.Error!void {
-    register.pushFunction(self.L, func);
+    stack.push(self.L, func);
 
     const c_name = try self.stringToCString(name);
     defer self.free(c_name);

@@ -44,4 +44,4 @@
 pub const definitions = @import("definitions.zig");
 pub const Diagnostics = @import("Diagnostics.zig");
 pub const Lua = @import("Lua.zig");
-pub const register = @import("register.zig");
+pub const stack = @import("stack.zig");
