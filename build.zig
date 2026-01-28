@@ -17,6 +17,7 @@ pub fn build(b: *std.Build) void {
         return;
 
     const lua_c = lua_lib.toModule(b);
+    b.modules.put(b.dupe("lua.c"), lua_c) catch @panic("OOM");
 
     // Library
     const lib_mod = b.addModule("lua.zig", .{
