@@ -28,11 +28,56 @@ If you want solely the C API :
 YOUR_MODULE.addImport("lua-c", lua_zig.module("lua.c"));
 ```
 
+Then, you can check out the `examples/` folder. An overview of the API is :
+```zig
+// functions can take a struct as
+// an argument !
+fn functor(value: struct {
+    internal: u32
+}) u32 {
+    std.log.debug("functor({})", .{value});
+
+    return value.internal * value.internal;
+}
+
+const LUA_PROGRAM =
+    \\function multiply(x, y)
+    \\    local z = x * y
+    \\    z = functor({ internal = z })
+    \\    return z
+    \\end
+;
+
+pub fn main(init: std.process.Init) !void {
+    var state: lua.Lua = try .init(init.gpa, .{});
+    defer state.deinit();
+    defer {
+        if (state.diag.hasErr()) {
+            std.log.err("{}: {s}", .{ state.diag.err.?, state.diag.message });
+        }
+    }
+
+    try state.setGlobal("functor", functor);
+
+    const reader = std.Io.Reader.fixed(LUA_PROGRAM);
+    try state.loadFromReader(reader);
+    // The program must be ran once to load symbols
+    try state.run();
+
+    // Return value (here `u32`) can be a struct, string, etc.
+    // If it is a string or a struct containing one, don't forget to call
+    // state.free(#) on it !
+    const ret = try state.call("multiply", .{ 2, 3 }, u32);
+
+    std.log.debug("functor(2 * 3) = {}", .{ret});
+}
+```
+
 
 <details>
 <summary>
 
-## Generate the Lua Library
+## Generate the Lua C Library
 
 </summary>
 
@@ -66,8 +111,6 @@ $ file zig-out/bin/
 zig-out/bin/: cannot open `zig-out/bin/' (No such file or directory)
 ```
 
-</details>
-
 ### Limitations
 The build toolchain uses the [Translate C](https://codeberg.org/ziglang/translate-c) API to generate the bindings.
 This is equivalent on older zig build to doing a `@cImport`, but the latter will be removed on later versions.
@@ -99,6 +142,8 @@ const my_str = lua.lua_tolstring(new_state, -1, null);
 ```
 
 aka. copying what is after the `@TypeOf` in the declaration and swapping the values `NULL` to `null` where applicable.
+
+</details>
 
 ## License
 I'm using [MIT](./LICENSE).
